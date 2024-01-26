@@ -1,0 +1,4 @@
+/microservice/target
+/testclient
+
+.DS_Store
