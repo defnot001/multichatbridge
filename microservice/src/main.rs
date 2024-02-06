@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         .connect_with(
             SqliteConnectOptions::new()
                 .create_if_missing(true)
-                .filename("database/data.db"),
+                .filename("data.db"),
         )
         .await?;
 
