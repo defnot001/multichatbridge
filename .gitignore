@@ -2,3 +2,5 @@
 /testclient
 
 .DS_Store
+config.toml
+*.db

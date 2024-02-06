@@ -1,14 +1,31 @@
-use axum::extract::ws::{Message, WebSocket};
-use futures::{sink::SinkExt, stream::StreamExt};
-use futures_util::stream::{SplitSink, SplitStream};
+use std::{net::SocketAddr, ops::ControlFlow};
 
-use std::net::SocketAddr;
-use std::ops::ControlFlow;
+use axum::{
+    extract::{
+        ws::{Message, WebSocket},
+        ConnectInfo, WebSocketUpgrade,
+    },
+    response::IntoResponse,
+};
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
+use tracing::{info, warn};
 
 use crate::message::process_message;
 
+pub async fn handle_websocket(
+    ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    info!("User agent at {addr} connected.");
+
+    ws.on_upgrade(move |socket| handle_socket(socket, addr))
+}
+
 /// Websocket statemachine, one will be spawned per connection
-pub async fn handle_socket(socket: WebSocket, address: SocketAddr) {
+async fn handle_socket(socket: WebSocket, address: SocketAddr) {
     let mut handler = WebSocketHandler::new(socket, address);
 
     // ping the client, if it does not respond, drop the connection
@@ -33,7 +50,7 @@ pub async fn handle_socket(socket: WebSocket, address: SocketAddr) {
         }
     });
 
-    println!("Websocket context {address} destroyed");
+    info!("Websocket context {address} destroyed");
 }
 
 /// This struct holds the `websocket connection` and the `client's address` and provides
@@ -59,11 +76,11 @@ impl WebSocketHandler {
 
     async fn ping_client(&mut self) -> ControlFlow<(), ()> {
         if self.sender.send(Message::Ping(vec![1, 2, 3])).await.is_ok() {
-            println!("Pinged {} successfully", self.address);
+            info!("Pinged {} successfully", self.address);
 
             ControlFlow::Continue(())
         } else {
-            println!(
+            warn!(
                 "Could not send ping to {}, closing connection...",
                 self.address
             );
@@ -86,11 +103,11 @@ impl WebSocketHandler {
 
                 ControlFlow::Continue(())
             } else {
-                println!("client {} abruptly disconnected", self.address);
+                warn!("client {} abruptly disconnected", self.address);
                 ControlFlow::Break(())
             }
         } else {
-            println!("stream at {} has closed", self.address);
+            warn!("stream at {} has closed", self.address);
             ControlFlow::Break(())
         }
     }
