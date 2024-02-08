@@ -3,6 +3,7 @@ mod config;
 mod database;
 mod handlers;
 mod message;
+mod middleware;
 mod routes;
 
 use axum::{
@@ -22,7 +23,6 @@ use crate::config::Config;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .without_time()
         .with_target(false)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
