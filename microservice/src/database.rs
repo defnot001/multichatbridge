@@ -152,19 +152,19 @@ impl DatabaseHelper {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AdminPostBody {
     pub server_id: String,
     pub server_list: Vec<String>,
     pub auth_token: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AdminDeleteBody {
     pub server_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AdminUpdateBody {
     pub server_id: String,
     pub server_list: Option<Vec<String>>,
