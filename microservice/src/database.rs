@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
-use sqlx::{pool::PoolConnection, FromRow, Sqlite, SqliteConnection, SqlitePool};
+use sqlx::{pool::PoolConnection, FromRow, Sqlite, SqlitePool};
 
 pub struct DatabaseConnection(pub PoolConnection<Sqlite>);
 
@@ -36,9 +36,11 @@ where
 pub struct DatabaseHelper;
 
 impl DatabaseHelper {
-    pub async fn list_users(connection: &mut SqliteConnection) -> anyhow::Result<Vec<GetUser>> {
+    pub async fn list_users(db_pool: SqlitePool) -> anyhow::Result<Vec<GetUser>> {
+        let mut connection = Self::acquire_connection(&db_pool).await?;
+
         let db_users = sqlx::query_as!(GetUserFromDB, "SELECT server_id, server_list FROM users")
-            .fetch_all(connection)
+            .fetch_all(connection.as_mut())
             .await?;
 
         let users = db_users
@@ -49,10 +51,8 @@ impl DatabaseHelper {
         Ok(users)
     }
 
-    pub async fn add_user(
-        data: AdminPostBody,
-        connection: &mut SqliteConnection,
-    ) -> anyhow::Result<()> {
+    pub async fn add_user(data: AdminPostBody, db_pool: SqlitePool) -> anyhow::Result<()> {
+        let mut connection = Self::acquire_connection(&db_pool).await?;
         let create_user = CreateUser::new(data.server_id, data.server_list, data.auth_token)?;
 
         let query_result = sqlx::query!(
@@ -61,7 +61,7 @@ impl DatabaseHelper {
             create_user.server_list,
             create_user.auth_token
         )
-        .execute(connection)
+        .execute(connection.as_mut())
         .await;
 
         if let Err(e) = query_result {
@@ -77,12 +77,11 @@ impl DatabaseHelper {
         Ok(())
     }
 
-    pub async fn delete_user(
-        data: AdminDeleteBody,
-        connection: &mut SqliteConnection,
-    ) -> anyhow::Result<()> {
+    pub async fn delete_user(data: AdminDeleteBody, db_pool: SqlitePool) -> anyhow::Result<()> {
+        let mut connection = Self::acquire_connection(&db_pool).await?;
+
         let query_result = sqlx::query!("DELETE FROM users WHERE server_id = $1", data.server_id)
-            .execute(connection)
+            .execute(connection.as_mut())
             .await;
 
         if let Err(e) = query_result {
@@ -95,11 +94,13 @@ impl DatabaseHelper {
 
     pub async fn update_user(
         data: AdminUpdateBody,
-        connection: &mut SqliteConnection,
+        db_pool: SqlitePool,
     ) -> anyhow::Result<GetUser> {
         if data.server_list.is_some() && data.server_list.clone().unwrap().is_empty() {
             return Err(anyhow::anyhow!("Server list cannot be empty"));
         }
+
+        let mut connection = Self::acquire_connection(&db_pool).await?;
 
         if data.server_list.is_some() && data.auth_token.is_some() {
             let server_list = serde_json::to_string(&data.server_list.unwrap())?;
@@ -111,7 +112,7 @@ impl DatabaseHelper {
                 auth_token,
                 data.server_id
             )
-            .fetch_one(connection)
+            .fetch_one(connection.as_mut())
             .await?;
 
             return Ok(GetUser::try_from(query_result)?);
@@ -123,7 +124,7 @@ impl DatabaseHelper {
                 server_list,
                 data.server_id
             )
-            .fetch_one(connection)
+            .fetch_one(connection.as_mut())
             .await?;
 
             return Ok(GetUser::try_from(query_result)?);
@@ -135,7 +136,7 @@ impl DatabaseHelper {
                 auth_token,
                 data.server_id
             )
-            .fetch_one(connection)
+            .fetch_one(connection.as_mut())
             .await?;
 
             return Ok(GetUser::try_from(query_result)?);
@@ -149,6 +150,15 @@ impl DatabaseHelper {
         hasher.update(password);
         hasher.update(b"lkajsdf982");
         format!("{:x}", hasher.finalize())
+    }
+
+    pub async fn acquire_connection(
+        db_pool: &SqlitePool,
+    ) -> anyhow::Result<PoolConnection<Sqlite>> {
+        db_pool.acquire().await.map_err(|e| {
+            tracing::error!("Failed to acquire a connection: {}", e);
+            anyhow::anyhow!("Failed to acquire a connection")
+        })
     }
 }
 
