@@ -1,10 +1,10 @@
 // #![allow(unused_imports, dead_code, unused_variables)]
 mod config;
 mod database;
-mod handlers;
 mod message;
 mod middleware;
 mod routes;
+mod model;
 
 use axum::{
     routing::{get, post},
@@ -46,11 +46,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
-        .route("/ws", get(handlers::websocket::handle_websocket))
-        .route("/config", post(handlers::config::handle_config))
+        .route("/ws", get(routes::websocket::handle_websocket))
+        .route("/config", post(routes::config::handle_config))
         .with_state(app_state.clone())
-        .nest("/admin", routes::admin::admin_router(app_state.clone()))
-        .fallback(handlers::not_found::handle_404);
+        .nest("/admin", routes::admin::admin_routes(app_state.clone()))
+        .fallback(routes::not_found::handle_404);
 
     let listener = tokio::net::TcpListener::bind(SocketAddr::new(
         IpAddr::V4(app_state.config.SERVER_IP),

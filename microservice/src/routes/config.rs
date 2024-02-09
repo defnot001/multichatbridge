@@ -1,14 +1,15 @@
 use axum::{
-    extract::Json,
+    extract::{Json, State},
     response::{IntoResponse, Json as JsonResponse},
 };
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
-pub async fn handle_config(body: Json<ConfigBody>) -> impl IntoResponse {
-    let body = body.0;
-    info!(">>> Received config: {:?}", body);
+use crate::AppState;
 
+pub async fn handle_config(
+    State(app_state): State<AppState>,
+    Json(body): Json<ConfigBody>,
+) -> impl IntoResponse {
     JsonResponse(body)
 }
 
