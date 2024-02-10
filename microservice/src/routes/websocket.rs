@@ -1,19 +1,28 @@
 use std::{net::SocketAddr, ops::ControlFlow};
 
+use axum::routing::post;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
         ConnectInfo, WebSocketUpgrade,
     },
     response::IntoResponse,
+    Router,
 };
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
+use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use crate::message::process_message;
+
+pub fn websocket_routes(db_pool: SqlitePool) -> Router {
+    Router::new()
+        .route("/ws", post(handle_websocket))
+        .with_state(db_pool)
+}
 
 pub async fn handle_websocket(
     ws: WebSocketUpgrade,
