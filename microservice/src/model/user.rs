@@ -8,8 +8,9 @@ pub struct UserModelController;
 impl UserModelController {
     pub async fn get_user_by_id(server_id: &str, db_pool: SqlitePool) -> anyhow::Result<User> {
         let mut connection = DatabaseUtils::new(db_pool).connection().await?;
+        let query_string = DatabaseUtils::query_from_file("user_get_by_id")?;
 
-        let db_user = sqlx::query_as::<_, UserInDB>("SELECT * FROM users WHERE server_id=?")
+        let db_user = sqlx::query_as::<_, UserInDB>(query_string.as_str())
             .bind(server_id)
             .fetch_one(connection.as_mut())
             .await;
@@ -24,11 +25,11 @@ impl UserModelController {
 
     pub async fn list_users(db_pool: SqlitePool) -> anyhow::Result<Vec<GetUser>> {
         let mut connection = DatabaseUtils::new(db_pool).connection().await?;
+        let query_string = DatabaseUtils::query_from_file("user_get_all")?;
 
-        let query_result =
-            sqlx::query_as::<_, GetUserFromDB>("SELECT server_id, server_list FROM users")
-                .fetch_all(connection.as_mut())
-                .await;
+        let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
+            .fetch_all(connection.as_mut())
+            .await;
 
         let users = match query_result {
             Ok(users) => users
@@ -44,22 +45,21 @@ impl UserModelController {
     }
 
     pub async fn add_user(mut data: AdminPostBody, db_pool: SqlitePool) -> anyhow::Result<()> {
-        let mut connection = DatabaseUtils::new(db_pool).connection().await?;
-
         if !data.server_list.contains(&"discord".to_string()) {
             data.server_list.push("discord".to_string());
         }
 
         let create_user = UserInDB::new(data.server_id.clone(), data.server_list, data.auth_token)?;
 
-        let query_result = sqlx::query(
-            "INSERT INTO users (server_id, server_list, auth_token) VALUES ($1, $2, $3)",
-        )
-        .bind(create_user.server_id)
-        .bind(create_user.server_list)
-        .bind(create_user.auth_token)
-        .execute(connection.as_mut())
-        .await;
+        let mut connection = DatabaseUtils::new(db_pool).connection().await?;
+        let query_string = DatabaseUtils::query_from_file("user_add")?;
+
+        let query_result = sqlx::query(query_string.as_str())
+            .bind(create_user.server_id)
+            .bind(create_user.server_list)
+            .bind(create_user.auth_token)
+            .execute(connection.as_mut())
+            .await;
 
         if let Err(e) = query_result {
             if e.to_string().contains("UNIQUE constraint failed") {
@@ -74,8 +74,9 @@ impl UserModelController {
 
     pub async fn delete_user(data: AdminDeleteBody, db_pool: SqlitePool) -> anyhow::Result<()> {
         let mut connection = DatabaseUtils::new(db_pool).connection().await?;
+        let query_string = DatabaseUtils::query_from_file("user_delete")?;
 
-        let query_result = sqlx::query("DELETE FROM users WHERE server_id=c?")
+        let query_result = sqlx::query(query_string.as_str())
             .bind(&data.server_id)
             .execute(connection.as_mut())
             .await;
@@ -113,7 +114,9 @@ impl UserModelController {
             let stringified_server_list = serde_json::to_string(&data.server_list.unwrap())?;
             let hashed_auth_token = DatabaseUtils::hash_password(data.auth_token.unwrap());
 
-            let query_result = sqlx::query_as::<_, GetUserFromDB>("UPDATE users SET server_list = $1, auth_token = $2 WHERE server_id = $3 RETURNING server_id, server_list")
+            let query_string = DatabaseUtils::query_from_file("user_update_serverlist_authtoken")?;
+
+            let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
                 .bind(stringified_server_list)
                 .bind(hashed_auth_token)
                 .bind(data.server_id)
@@ -127,7 +130,9 @@ impl UserModelController {
         } else if data.server_list.is_some() && data.auth_token.is_none() {
             let stringified_server_list = serde_json::to_string(&data.server_list.unwrap())?;
 
-            let query_result = sqlx::query_as::<_, GetUserFromDB>("UPDATE users SET server_list = $1 WHERE server_id = $2 RETURNING server_id, server_list")
+            let query_string = DatabaseUtils::query_from_file("user_update_serverlist")?;
+
+            let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
                 .bind(stringified_server_list)
                 .bind(data.server_id)
                 .fetch_one(connection.as_mut())
@@ -140,7 +145,9 @@ impl UserModelController {
         } else if data.auth_token.is_some() && data.server_list.is_none() {
             let hashed_auth_token = DatabaseUtils::hash_password(data.auth_token.unwrap());
 
-            let query_result = sqlx::query_as::<_, GetUserFromDB>("UPDATE users SET auth_token = $1 WHERE server_id = $2 RETURNING server_id, server_list")
+            let query_string = DatabaseUtils::query_from_file("user_update_authtoken")?;
+
+            let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
                 .bind(hashed_auth_token)
                 .fetch_one(connection.as_mut())
                 .await;
