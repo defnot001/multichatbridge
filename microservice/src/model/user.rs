@@ -16,27 +16,29 @@ impl UserModelController {
 
         match db_user {
             Ok(db_user) => User::try_from(db_user),
-            Err(e) => {
-                let error_msg = format!("Failed to get user {server_id} from database: {e}");
-
-                tracing::error!(error_msg);
-                Err(anyhow::anyhow!(error_msg))
-            }
+            Err(e) => Err(anyhow::anyhow!(
+                "Failed to get user {server_id} from database: {e}"
+            )),
         }
     }
 
     pub async fn list_users(db_pool: SqlitePool) -> anyhow::Result<Vec<GetUser>> {
         let mut connection = DatabaseUtils::new(db_pool).connection().await?;
 
-        let db_users =
+        let query_result =
             sqlx::query_as::<_, GetUserFromDB>("SELECT server_id, server_list FROM users")
                 .fetch_all(connection.as_mut())
-                .await?;
+                .await;
 
-        let users = db_users
-            .into_iter()
-            .map(GetUser::try_from)
-            .collect::<Result<Vec<GetUser>, _>>()?;
+        let users = match query_result {
+            Ok(users) => users
+                .into_iter()
+                .map(GetUser::try_from)
+                .collect::<Result<Vec<GetUser>, _>>()?,
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to get users from database: {e}"));
+            }
+        };
 
         Ok(users)
     }
@@ -61,15 +63,10 @@ impl UserModelController {
 
         if let Err(e) = query_result {
             if e.to_string().contains("UNIQUE constraint failed") {
-                let error_msg = format!("User {} already exists", data.server_id);
-
-                tracing::error!(error_msg);
-                return Err(anyhow::anyhow!(error_msg));
+                return Err(anyhow::anyhow!("User {} already exists", data.server_id));
             }
-            let error_msg = format!("Failed to add user: {}", e);
 
-            tracing::error!(error_msg);
-            return Err(anyhow::anyhow!(error_msg));
+            return Err(anyhow::anyhow!("Failed to add user: {}", e));
         }
 
         Ok(())
@@ -78,16 +75,16 @@ impl UserModelController {
     pub async fn delete_user(data: AdminDeleteBody, db_pool: SqlitePool) -> anyhow::Result<()> {
         let mut connection = DatabaseUtils::new(db_pool).connection().await?;
 
-        let query_result = sqlx::query("DELETE FROM users WHERE server_id = ?")
+        let query_result = sqlx::query("DELETE FROM users WHERE server_id=c?")
             .bind(&data.server_id)
             .execute(connection.as_mut())
             .await;
 
         if let Err(e) = query_result {
-            let error_msg = format!("Failed to delete user {}: {e}", data.server_id);
-
-            tracing::error!(error_msg);
-            return Err(anyhow::anyhow!(error_msg));
+            return Err(anyhow::anyhow!(
+                "Failed to delete user {}: {e}",
+                data.server_id
+            ));
         }
 
         Ok(())
@@ -121,9 +118,12 @@ impl UserModelController {
                 .bind(hashed_auth_token)
                 .bind(data.server_id)
                 .fetch_one(connection.as_mut())
-                .await?;
+                .await;
 
-            GetUser::try_from(query_result)
+            match query_result {
+                Ok(query_result) => GetUser::try_from(query_result),
+                Err(e) => Err(anyhow::anyhow!("Failed to update user: {}", e)),
+            }
         } else if data.server_list.is_some() && data.auth_token.is_none() {
             let stringified_server_list = serde_json::to_string(&data.server_list.unwrap())?;
 
@@ -131,32 +131,38 @@ impl UserModelController {
                 .bind(stringified_server_list)
                 .bind(data.server_id)
                 .fetch_one(connection.as_mut())
-                .await?;
+                .await;
 
-            GetUser::try_from(query_result)
+            match query_result {
+                Ok(query_result) => GetUser::try_from(query_result),
+                Err(e) => Err(anyhow::anyhow!("Failed to update user: {}", e)),
+            }
         } else if data.auth_token.is_some() && data.server_list.is_none() {
             let hashed_auth_token = DatabaseUtils::hash_password(data.auth_token.unwrap());
 
             let query_result = sqlx::query_as::<_, GetUserFromDB>("UPDATE users SET auth_token = $1 WHERE server_id = $2 RETURNING server_id, server_list")
                 .bind(hashed_auth_token)
                 .fetch_one(connection.as_mut())
-                .await?;
+                .await;
 
-            GetUser::try_from(query_result)
+            match query_result {
+                Ok(query_result) => GetUser::try_from(query_result),
+                Err(e) => Err(anyhow::anyhow!("Failed to update user: {}", e)),
+            }
         } else {
             Err(anyhow::anyhow!("No data to update"))
         }
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AdminPostBody {
     pub server_id: String,
     pub server_list: Vec<String>,
     pub auth_token: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AdminDeleteBody {
     pub server_id: String,
 }
