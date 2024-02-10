@@ -28,7 +28,7 @@ pub fn admin_routes(app_state: AppState) -> Router {
 }
 
 pub async fn handle_admin_list(State(app_state): State<AppState>) -> impl IntoResponse {
-    if let Ok(users) = UserModelController::list_users(&app_state.db_pool).await {
+    if let Ok(users) = UserModelController::list_users(app_state.db_pool).await {
         tracing::info!("User List Requested: {:#?}", users);
         return Json(users).into_response();
     }
@@ -41,14 +41,14 @@ pub async fn handle_admin_add(
     State(app_state): State<AppState>,
     Json(body): Json<AdminPostBody>,
 ) -> impl IntoResponse {
-    match UserModelController::add_user(body.clone(), &app_state.db_pool).await {
+    match UserModelController::add_user(body.clone(), app_state.db_pool).await {
         Ok(_) => {
             tracing::info!("User Added: {:#?}", body);
-            return Json(AdminResponseBody {
+            Json(AdminResponseBody {
                 success: true,
                 reason: None,
             })
-            .into_response();
+            .into_response()
         }
         Err(e) => {
             tracing::error!("Failed to add user: {}", e);
@@ -58,7 +58,7 @@ pub async fn handle_admin_add(
                 reason: Some(e.to_string()),
             });
 
-            return (status_code, body).into_response();
+            (status_code, body).into_response()
         }
     }
 }
@@ -67,22 +67,22 @@ pub async fn handle_admin_delete(
     State(app_state): State<AppState>,
     Json(body): Json<AdminDeleteBody>,
 ) -> impl IntoResponse {
-    match UserModelController::delete_user(body.clone(), &app_state.db_pool).await {
+    match UserModelController::delete_user(body.clone(), app_state.db_pool).await {
         Ok(_) => {
             tracing::info!("User Deleted: {:#?}", body);
-            return Json(AdminResponseBody {
+            Json(AdminResponseBody {
                 success: true,
                 reason: None,
             })
-            .into_response();
+            .into_response()
         }
         Err(e) => {
             tracing::error!("Failed to delete user: {}", e);
-            return Json(AdminResponseBody {
+            Json(AdminResponseBody {
                 success: false,
                 reason: Some(e.to_string()),
             })
-            .into_response();
+            .into_response()
         }
     }
 }
@@ -91,7 +91,7 @@ pub async fn handle_admin_update(
     State(app_state): State<AppState>,
     Json(body): Json<AdminUpdateBody>,
 ) -> impl IntoResponse {
-    match UserModelController::update_user(body.clone(), &app_state.db_pool).await {
+    match UserModelController::update_user(body.clone(), app_state.db_pool).await {
         Ok(user) => {
             tracing::info!("User Updated: {:#?}", user);
             let response = json!({
@@ -100,15 +100,15 @@ pub async fn handle_admin_update(
                 "updated_user": user,
             });
 
-            return Json(response).into_response();
+            Json(response).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to update user: {}", e);
-            return Json(AdminResponseBody {
+            Json(AdminResponseBody {
                 success: false,
                 reason: Some(e.to_string()),
             })
-            .into_response();
+            .into_response()
         }
     }
 }
