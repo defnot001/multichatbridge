@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 use crate::ctx::ctx_client::ClientCtx;
 use crate::middleware::mw_auth_client::mw_client_auth;
 use crate::model::config::{ClientConfig, ConfigModelController};
+use crate::model::user::UserModelController;
 
 pub fn config_routes(db_pool: SqlitePool) -> Router {
     Router::new()
@@ -27,6 +28,14 @@ pub async fn handle_config_post(
     State(db_pool): State<SqlitePool>,
     Json(body): Json<ConfigRequestBody>,
 ) -> impl IntoResponse {
+    if let Err(e) = is_config_allowed(client_ctx.client_id(), &body, db_pool.clone()).await {
+        return (
+            StatusCode::FORBIDDEN,
+            format!("Not allowed to add config: {}", e),
+        )
+            .into_response();
+    }
+
     match ConfigModelController::add_or_update_config(
         client_ctx.client_id.as_str(),
         &body.subscriptions,
@@ -48,6 +57,25 @@ pub async fn handle_config_post(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+pub async fn is_config_allowed(
+    client_id: &str,
+    body: &ConfigRequestBody,
+    db_pool: SqlitePool,
+) -> anyhow::Result<()> {
+    let user = UserModelController::get_user_by_id(client_id, db_pool).await?;
+
+    for sub in &body.subscriptions {
+        if !user.server_list.contains(sub) {
+            let error_msg = format!("Client {client_id} is not allowed to subscribe to {sub}");
+
+            tracing::error!(error_msg);
+            return Err(anyhow::anyhow!(error_msg));
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
