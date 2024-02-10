@@ -41,8 +41,13 @@ impl UserModelController {
         Ok(users)
     }
 
-    pub async fn add_user(data: AdminPostBody, db_pool: SqlitePool) -> anyhow::Result<()> {
+    pub async fn add_user(mut data: AdminPostBody, db_pool: SqlitePool) -> anyhow::Result<()> {
         let mut connection = DatabaseUtils::new(db_pool).connection().await?;
+
+        if !data.server_list.contains(&"discord".to_string()) {
+            data.server_list.push("discord".to_string());
+        }
+
         let create_user = UserInDB::new(data.server_id.clone(), data.server_list, data.auth_token)?;
 
         let query_result = sqlx::query(
@@ -89,11 +94,20 @@ impl UserModelController {
     }
 
     pub async fn update_user(
-        data: AdminUpdateBody,
+        mut data: AdminUpdateBody,
         db_pool: SqlitePool,
     ) -> anyhow::Result<GetUser> {
         if data.server_list.is_some() && data.server_list.clone().unwrap().is_empty() {
             return Err(anyhow::anyhow!("Server list cannot be empty"));
+        }
+
+        if let Some(server_list) = &data.server_list {
+            if !server_list.contains(&"discord".to_string()) {
+                data.server_list
+                    .as_mut()
+                    .unwrap()
+                    .push("discord".to_string());
+            }
         }
 
         let mut connection = DatabaseUtils::new(db_pool).connection().await?;
