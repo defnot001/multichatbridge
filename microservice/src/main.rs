@@ -1,24 +1,20 @@
-// #![allow(unused_imports, dead_code, unused_variables)]
-mod config;
-mod database;
-mod message;
-mod middleware;
-mod routes;
-mod model;
-
-use axum::{
-    routing::{get, post},
-    Router,
-};
-use sqlx::{
-    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
-    SqlitePool,
-};
 use std::net::{IpAddr, SocketAddr};
+
+use axum::Router;
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
+use crate::routes::{admin::admin_routes, config::config_routes, websocket::websocket_routes};
+
+mod config;
+mod ctx;
+mod database_utils;
+mod message;
+mod middleware;
+mod model;
+mod routes;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,29 +23,19 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
+    let config = Config::load_from_env()?;
+
     let db_pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect_with(
-            SqliteConnectOptions::new()
-                .create_if_missing(true)
-                .filename("data.db"),
-        )
+        .connect(&config.DATABASE_URL)
         .await?;
 
-    sqlx::migrate!("./database/migrations")
-        .run(&db_pool)
-        .await?;
-
-    let app_state = AppState {
-        db_pool,
-        config: Config::load_from_env()?,
-    };
+    let app_state = AppState { db_pool, config };
 
     let app = Router::new()
-        .route("/ws", get(routes::websocket::handle_websocket))
-        .route("/config", post(routes::config::handle_config))
-        .with_state(app_state.clone())
-        .nest("/admin", routes::admin::admin_routes(app_state.clone()))
+        .merge(websocket_routes(app_state.db_pool.clone()))
+        .nest("/config", config_routes(app_state.db_pool.clone()))
+        .nest("/admin", admin_routes(app_state.clone()))
         .fallback(routes::not_found::handle_404);
 
     let listener = tokio::net::TcpListener::bind(SocketAddr::new(
