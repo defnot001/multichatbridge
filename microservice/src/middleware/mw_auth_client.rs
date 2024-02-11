@@ -8,7 +8,7 @@ use axum_extra::TypedHeader;
 use headers::{authorization::Bearer, Authorization};
 use sqlx::SqlitePool;
 
-use crate::ctx::ctx_client::ClientCtx;
+use crate::ctx::ctx_client::{ClientCtx, Identifier};
 use crate::database_utils::DatabaseUtils;
 use crate::model::user::UserModelController;
 
@@ -19,7 +19,7 @@ pub async fn mw_client_auth(
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if let Err(e) = authorize_client(client_ctx.client_id(), db_pool, &auth).await {
+    if let Err(e) = authorize_client(client_ctx.identifier(), db_pool, &auth).await {
         if e.to_string() == "Unauthorized Admin Request" {
             return Err(StatusCode::UNAUTHORIZED);
         }
@@ -33,11 +33,11 @@ pub async fn mw_client_auth(
 }
 
 async fn authorize_client(
-    client_id: &str,
+    identifier: &Identifier,
     db_pool: SqlitePool,
     auth_token: &Authorization<Bearer>,
 ) -> anyhow::Result<()> {
-    let user = match UserModelController::get_user_by_id(client_id, db_pool).await {
+    let user = match UserModelController::get_user_by_id(identifier.server_id(), db_pool).await {
         Ok(user) => user,
         Err(e) => return Err(e),
     };
