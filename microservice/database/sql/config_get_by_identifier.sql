@@ -1,3 +1,3 @@
-DELETE
+SELECT *
 FROM configs
 WHERE identifier = ?;

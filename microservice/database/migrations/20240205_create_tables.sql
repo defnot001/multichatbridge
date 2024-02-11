@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS users
 
 CREATE TABLE IF NOT EXISTS configs
 (
-    client_id     TEXT NOT NULL UNIQUE PRIMARY KEY,
+    identifier    TEXT NOT NULL UNIQUE PRIMARY KEY,
+    server_id     TEXT NOT NULL,
+    client_id     TEXT NOT NULL UNIQUE,
     subscriptions TEXT NOT NULL
 );
