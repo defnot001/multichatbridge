@@ -4,6 +4,8 @@ use axum::async_trait;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
+use serde::Deserialize;
+use serde_with::serde_derive::Serialize;
 
 /// ClientID represents a unique identifier for a client.
 ///
@@ -12,7 +14,7 @@ use axum::http::StatusCode;
 /// The server ID is used to identify the server that the client is connected to. The client ID is used to identify the client.
 ///
 /// The format of the client ID is `server_id:client_id`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identifier {
     pub server_id: String,
     pub client_id: String,
@@ -38,10 +40,10 @@ impl Identifier {
         &self.server_id
     }
 
-    // /// Returns the client ID.
-    // pub fn client_id(&self) -> &str {
-    //     &self.client_id
-    // }
+    /// Returns the client ID.
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
 
     /// Tries to create a new [Identifier] from a string representation.
     ///
