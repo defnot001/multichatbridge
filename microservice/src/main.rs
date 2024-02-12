@@ -1,11 +1,14 @@
 use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use tokio::sync::Mutex as TokioMutex;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
+use crate::ctx::ctx_client::Identifier;
 use crate::routes::{admin::admin_routes, config::config_routes, websocket::websocket_routes};
 
 mod config;
@@ -15,6 +18,7 @@ mod message;
 mod middleware;
 mod model;
 mod routes;
+mod websocket;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .connect(&config.DATABASE_URL)
         .await?;
 
-    let app_state = AppState { db_pool, config };
+    let app_state = AppState::new(db_pool, config);
 
     let app = Router::new()
         .merge(websocket_routes(app_state.db_pool.clone()))
@@ -59,4 +63,21 @@ async fn main() -> anyhow::Result<()> {
 struct AppState {
     db_pool: SqlitePool,
     config: Config,
+    active_connections: Arc<TokioMutex<Vec<ActiveConnection>>>,
+}
+
+impl AppState {
+    pub fn new(db_pool: SqlitePool, config: Config) -> Self {
+        Self {
+            db_pool,
+            config,
+            active_connections: Arc::new(TokioMutex::new(Vec::new())),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ActiveConnection {
+    identifier: Identifier,
+    subscriptions: Vec<String>,
 }
