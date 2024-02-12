@@ -12,13 +12,13 @@ impl UserModelController {
 
         let db_user = sqlx::query_as::<_, UserInDB>(query_string.as_str())
             .bind(server_id)
-            .fetch_one(connection.as_mut())
-            .await;
+            .fetch_optional(connection.as_mut())
+            .await?;
 
         match db_user {
-            Ok(db_user) => User::try_from(db_user),
-            Err(e) => Err(anyhow::anyhow!(
-                "Failed to get user {server_id} from database: {e}"
+            Some(db_user) => User::try_from(db_user),
+            None => Err(anyhow::anyhow!(
+                "User {server_id} does not exist in the database"
             )),
         }
     }
