@@ -62,7 +62,7 @@ impl UserModelController {
 
     pub async fn update_user(
         data: AdminUpdateBody,
-        db_pool: SqlitePool,
+        db_pool: &SqlitePool,
     ) -> anyhow::Result<UserNoToken> {
         if let Some(mut server_list) = data.server_list.clone() {
             if server_list.is_empty() {
