@@ -1,164 +1,113 @@
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
-use crate::database_utils::DatabaseUtils;
+use crate::database_utils::{acquire_connection, hash_password};
 
 pub struct UserModelController;
 
 impl UserModelController {
-    pub async fn get_user_by_id(server_id: &str, db_pool: SqlitePool) -> anyhow::Result<User> {
-        let mut connection = DatabaseUtils::new(db_pool).connection().await?;
-        let query_string = DatabaseUtils::query_from_file("user_get_by_id")?;
-
-        let db_user = sqlx::query_as::<_, UserInDB>(query_string.as_str())
+    pub async fn get_user_by_id(server_id: &str, db_pool: &SqlitePool) -> anyhow::Result<User> {
+        sqlx::query_as::<_, UserInDB>("SELECT * FROM users WHERE server_id = ?;")
             .bind(server_id)
-            .fetch_optional(connection.as_mut())
-            .await?;
-
-        match db_user {
-            Some(db_user) => User::try_from(db_user),
-            None => Err(anyhow::anyhow!(
-                "User {server_id} does not exist in the database"
-            )),
-        }
+            .fetch_optional(acquire_connection(db_pool).await?.as_mut())
+            .await
+            .context("Failed to get user: {e}")?
+            .map(|user| user.try_into())
+            .transpose()?
+            .ok_or_else(|| anyhow::anyhow!("User not found"))
     }
 
-    pub async fn list_users(db_pool: SqlitePool) -> anyhow::Result<Vec<GetUser>> {
-        let mut connection = DatabaseUtils::new(db_pool).connection().await?;
-        let query_string = DatabaseUtils::query_from_file("user_get_all")?;
-
-        let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
-            .fetch_all(connection.as_mut())
-            .await;
-
-        let users = match query_result {
-            Ok(users) => users
-                .into_iter()
-                .map(GetUser::try_from)
-                .collect::<Result<Vec<GetUser>, _>>()?,
-            Err(e) => {
-                return Err(anyhow::anyhow!("Failed to get users from database: {e}"));
-            }
-        };
-
-        Ok(users)
+    pub async fn list_users(db_pool: &SqlitePool) -> anyhow::Result<Vec<UserNoToken>> {
+        sqlx::query_as::<_, UserNoTokenInDB>("SELECT server_id, server_list FROM users;")
+            .fetch_all(acquire_connection(db_pool).await?.as_mut())
+            .await
+            .context("Failed to get users from database")?
+            .into_iter()
+            .map(|user| user.try_into())
+            .collect()
     }
 
-    pub async fn add_user(mut data: AdminPostBody, db_pool: SqlitePool) -> anyhow::Result<()> {
-        if !data.server_list.contains(&"discord".to_string()) {
-            data.server_list.push("discord".to_string());
-        }
+    pub async fn add_user(
+        mut data: AdminPostBody,
+        db_pool: &SqlitePool,
+    ) -> anyhow::Result<UserNoToken> {
+        add_if_not_contains(&mut data.server_list, "discord".to_string());
 
-        let create_user = UserInDB::new(data.server_id.clone(), data.server_list, data.auth_token)?;
-
-        let mut connection = DatabaseUtils::new(db_pool).connection().await?;
-        let query_string = DatabaseUtils::query_from_file("user_add")?;
-
-        let query_result = sqlx::query(query_string.as_str())
-            .bind(create_user.server_id)
-            .bind(create_user.server_list)
-            .bind(create_user.auth_token)
-            .execute(connection.as_mut())
-            .await;
-
-        if let Err(e) = query_result {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                return Err(anyhow::anyhow!("User {} already exists", data.server_id));
-            }
-
-            return Err(anyhow::anyhow!("Failed to add user: {}", e));
-        }
-
-        Ok(())
+        sqlx::query_as::<_, UserNoTokenInDB>(
+            "INSERT INTO users (server_id, server_list, auth_token) VALUES (?, ?, ?) RETURNING *;",
+        )
+        .bind(data.server_id)
+        .bind(serde_json::to_string(&data.server_list).context("Failed to serialize serverlist")?)
+        .bind(data.auth_token)
+        .fetch_one(acquire_connection(db_pool).await?.as_mut())
+        .await
+        .context("Failed to add user")?
+        .try_into()
     }
 
-    pub async fn delete_user(data: AdminDeleteBody, db_pool: SqlitePool) -> anyhow::Result<()> {
-        let mut connection = DatabaseUtils::new(db_pool).connection().await?;
-        let query_string = DatabaseUtils::query_from_file("user_delete")?;
-
-        let query_result = sqlx::query(query_string.as_str())
-            .bind(&data.server_id)
-            .execute(connection.as_mut())
-            .await;
-
-        if let Err(e) = query_result {
-            return Err(anyhow::anyhow!(
-                "Failed to delete user {}: {e}",
-                data.server_id
-            ));
-        }
-
-        Ok(())
+    pub async fn delete_user(
+        data: AdminDeleteBody,
+        db_pool: &SqlitePool,
+    ) -> anyhow::Result<UserNoToken> {
+        sqlx::query_as::<_, UserNoTokenInDB>("DELETE FROM users WHERE server_id = ? RETURNING *;")
+            .bind(data.server_id)
+            .fetch_optional(acquire_connection(db_pool).await?.as_mut())
+            .await
+            .context("Failed to delete user")?
+            .map(|user| user.try_into())
+            .transpose()?
+            .ok_or_else(|| anyhow::anyhow!("User not found"))
     }
 
     pub async fn update_user(
-        mut data: AdminUpdateBody,
+        data: AdminUpdateBody,
         db_pool: SqlitePool,
-    ) -> anyhow::Result<GetUser> {
-        if data.server_list.is_some() && data.server_list.clone().unwrap().is_empty() {
-            return Err(anyhow::anyhow!("Server list cannot be empty"));
+    ) -> anyhow::Result<UserNoToken> {
+        if let Some(mut server_list) = data.server_list.clone() {
+            if server_list.is_empty() {
+                return Err(anyhow::anyhow!("Server list cannot be empty"));
+            }
+
+            add_if_not_contains(server_list.as_mut(), "discord".to_string());
         }
 
-        if let Some(server_list) = &data.server_list {
-            if !server_list.contains(&"discord".to_string()) {
-                data.server_list
-                    .as_mut()
-                    .unwrap()
-                    .push("discord".to_string());
-            }
-        }
+        let stringified_server_list =
+            if let Ok(server_list) = serde_json::to_string(&data.server_list) {
+                Some(server_list)
+            } else {
+                None
+            };
 
-        let mut connection = DatabaseUtils::new(db_pool).connection().await?;
-
-        if data.server_list.is_some() && data.auth_token.is_some() {
-            let stringified_server_list = serde_json::to_string(&data.server_list.unwrap())?;
-            let hashed_auth_token = DatabaseUtils::hash_password(data.auth_token.unwrap());
-
-            let query_string = DatabaseUtils::query_from_file("user_update_serverlist_authtoken")?;
-
-            let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
-                .bind(stringified_server_list)
-                .bind(hashed_auth_token)
-                .bind(data.server_id)
-                .fetch_one(connection.as_mut())
-                .await;
-
-            match query_result {
-                Ok(query_result) => GetUser::try_from(query_result),
-                Err(e) => Err(anyhow::anyhow!("Failed to update user: {}", e)),
-            }
-        } else if data.server_list.is_some() && data.auth_token.is_none() {
-            let stringified_server_list = serde_json::to_string(&data.server_list.unwrap())?;
-
-            let query_string = DatabaseUtils::query_from_file("user_update_serverlist")?;
-
-            let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
-                .bind(stringified_server_list)
-                .bind(data.server_id)
-                .fetch_one(connection.as_mut())
-                .await;
-
-            match query_result {
-                Ok(query_result) => GetUser::try_from(query_result),
-                Err(e) => Err(anyhow::anyhow!("Failed to update user: {}", e)),
-            }
-        } else if data.auth_token.is_some() && data.server_list.is_none() {
-            let hashed_auth_token = DatabaseUtils::hash_password(data.auth_token.unwrap());
-
-            let query_string = DatabaseUtils::query_from_file("user_update_authtoken")?;
-
-            let query_result = sqlx::query_as::<_, GetUserFromDB>(query_string.as_str())
-                .bind(hashed_auth_token)
-                .fetch_one(connection.as_mut())
-                .await;
-
-            match query_result {
-                Ok(query_result) => GetUser::try_from(query_result),
-                Err(e) => Err(anyhow::anyhow!("Failed to update user: {}", e)),
-            }
+        let hashed_token = if let Some(token) = data.auth_token {
+            Some(hash_password(token))
         } else {
-            Err(anyhow::anyhow!("No data to update"))
-        }
+            None
+        };
+
+        let sql_query = r#"
+            UPDATE users SET
+                server_list = CASE WHEN $1 IS NOT NULL THEN $1 ELSE server_list END,
+                auth_token = CASE WHEN $2 IS NOT NULL THEN $2 ELSE auth_token END
+            WHERE server_id = $3
+            RETURNING server_id, server_list;
+        "#;
+
+        return sqlx::query_as::<_, UserNoTokenInDB>(sql_query)
+            .bind(stringified_server_list)
+            .bind(hashed_token)
+            .bind(data.server_id)
+            .fetch_optional(acquire_connection(&db_pool).await?.as_mut())
+            .await
+            .context("Failed to update user")?
+            .map(|user| user.try_into())
+            .context("Failed to deserialize user")?;
+    }
+}
+
+fn add_if_not_contains<T: PartialEq>(list: &mut Vec<T>, item: T) {
+    if !list.contains(&item) {
+        list.push(item);
     }
 }
 
@@ -216,27 +165,27 @@ impl UserInDB {
         Ok(Self {
             server_id,
             server_list: serde_json::to_string(&server_list)?,
-            auth_token: DatabaseUtils::hash_password(unhashed_auth_token),
+            auth_token: hash_password(unhashed_auth_token),
         })
     }
 }
 
 #[derive(Debug, FromRow, Deserialize)]
-pub struct GetUserFromDB {
+pub struct UserNoTokenInDB {
     pub server_id: String,
     pub server_list: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct GetUser {
+pub struct UserNoToken {
     pub server_id: String,
     pub server_list: Vec<String>,
 }
 
-impl TryFrom<GetUserFromDB> for GetUser {
+impl TryFrom<UserNoTokenInDB> for UserNoToken {
     type Error = anyhow::Error;
 
-    fn try_from(user: GetUserFromDB) -> Result<Self, Self::Error> {
+    fn try_from(user: UserNoTokenInDB) -> Result<Self, Self::Error> {
         Ok(Self {
             server_id: user.server_id,
             server_list: serde_json::from_str(&user.server_list)?,
