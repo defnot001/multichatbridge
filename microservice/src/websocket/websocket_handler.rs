@@ -1,98 +1,103 @@
 use std::net::SocketAddr;
-use std::ops::ControlFlow;
 
-use axum::extract::ws::{Message, WebSocket};
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
-use tracing::{info, warn};
+use axum::extract::ws::WebSocket;
+use futures_util::StreamExt;
 
+use crate::ctx::ctx_client::ClientCtx;
 use crate::message::process_message;
+use crate::{ActiveConnection, ActiveConnections};
 
-/// Websocket statemachine, one will be spawned per connection
-pub async fn handle_socket(socket: WebSocket, address: SocketAddr) {
-    let mut handler = WebSocketHandler::new(socket, address);
-
-    // ping the client, if it does not respond, drop the connection
-    if handler.ping_client().await.is_break() {
-        return;
-    }
-
-    // wait for a single message from the client (usually the pong), if it does not respond, drop the connection
-    if handler.receive_single_message().await.is_break() {
-        return;
-    }
-
-    tokio::spawn(async move {
-        while let Some(Ok(msg)) = handler.receiver.next().await {
+pub async fn handle_socket(
+    socket: WebSocket,
+    address: SocketAddr,
+    subscriptions: Vec<String>,
+    client_ctx: ClientCtx,
+    conn: ActiveConnection,
+    active_connections: ActiveConnections,
+) {
+    let receive_task = tokio::spawn(async move {
+        let (mut ws_sender, mut ws_receiver) = socket.split();
+        while let Some(Ok(msg)) = ws_receiver.next().await {
             if process_message(msg.clone(), address).is_break() {
-                break;
-            }
-
-            if handler.sender.send(msg).await.is_err() {
                 break;
             }
         }
     });
-
-    info!("Websocket context {address} destroyed");
 }
 
-/// This struct holds the `websocket connection` and the `client's address` and provides
-/// convenience methods for sending and receiving messages.
-#[derive(Debug)]
-struct WebSocketHandler {
-    address: SocketAddr,
-    sender: SplitSink<WebSocket, Message>,
-    receiver: SplitStream<WebSocket>,
-}
-
-impl WebSocketHandler {
-    /// Creates a new `SplitWebsocketHandler` from a `WebSocket` and a `SocketAddr`.
-    fn new(socket: WebSocket, address: SocketAddr) -> Self {
-        let (sender, receiver) = socket.split();
-
-        Self {
-            address,
-            sender,
-            receiver,
-        }
-    }
-
-    async fn ping_client(&mut self) -> ControlFlow<(), ()> {
-        if self.sender.send(Message::Ping(vec![1, 2, 3])).await.is_ok() {
-            info!("Pinged {} successfully", self.address);
-
-            ControlFlow::Continue(())
-        } else {
-            warn!(
-                "Could not send ping to {}, closing connection...",
-                self.address
-            );
-
-            ControlFlow::Break(())
-        }
-    }
-
-    /// Waits for a single message from the client and returns `ControlFlow::Continue` if the
-    /// message was received successfully or `ControlFlow::Break` if the message could not be
-    /// received if there was an error or if the client closed the connection. Usually this would
-    /// be used after sending a ping to the client to check if the client is still alive. This will
-    /// block the current task, but will not block other client's connections.
-    async fn receive_single_message(&mut self) -> ControlFlow<(), ()> {
-        if let Some(msg) = self.receiver.next().await {
-            if let Ok(msg) = msg {
-                if process_message(msg, self.address).is_break() {
-                    return ControlFlow::Break(());
-                }
-
-                ControlFlow::Continue(())
-            } else {
-                warn!("client {} abruptly disconnected", self.address);
-                ControlFlow::Break(())
-            }
-        } else {
-            warn!("stream at {} has closed", self.address);
-            ControlFlow::Break(())
-        }
-    }
-}
+// #[derive(Debug)]
+// struct WebSocketHandler {
+//     socket: WebSocket,
+//     identifier: Identifier,
+//     subscriptions: Vec<String>,
+//     address: SocketAddr,
+//     connection: ActiveConnection,
+//     active_connections: ActiveConnections,
+// }
+//
+// impl WebSocketHandler {
+//     fn new(
+//         socket: WebSocket,
+//         identifier: Identifier,
+//         subscriptions: Vec<String>,
+//         address: SocketAddr,
+//         connection: ActiveConnection,
+//         active_connections: ActiveConnections,
+//     ) -> Self {
+//         Self {
+//             socket,
+//             identifier,
+//             subscriptions,
+//             address,
+//             connection,
+//             active_connections,
+//         }
+//     }
+//
+//     async fn check_health(&mut self) {
+//         let mut interval = interval(Duration::from_secs(60));
+//
+//         loop {
+//             interval.tick().await;
+//
+//             if !self.check_connection_alive().await {
+//                 self.disconnect_client().await;
+//                 break;
+//             }
+//         }
+//     }
+//
+//     async fn check_connection_alive(&mut self) -> bool {
+//         let ping_message = Message::Ping(vec![1, 2, 3]);
+//
+//         match tokio::time::timeout(Duration::from_secs(5), self.socket.send(ping_message)).await {
+//             Ok(Ok(())) => {
+//                 match tokio::time::timeout(Duration::from_secs(5), self.receiver.next()).await {
+//                     Ok(Some(Ok(Message::Pong(_)))) => true,
+//                     _ => false,
+//                 }
+//             }
+//             _ => {
+//                 // Error occurred while sending ping message, connection is considered inactive
+//                 false
+//             }
+//         }
+//     }
+//
+//     async fn disconnect_client(&mut self) {
+//         if let Err(e) = self.sender.close().await {
+//             warn!(
+//                 "Failed to close connection for {} at {}: {}",
+//                 self.identifier.to_string(),
+//                 self.address,
+//                 e
+//             )
+//         } else {
+//             info!(
+//                 "Closed connection to {} at {}",
+//                 self.identifier.to_string(),
+//                 self.address
+//             )
+//         }
+//     }
+// }
