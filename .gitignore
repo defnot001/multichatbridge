@@ -4,5 +4,6 @@
 .DS_Store
 config.toml
 *.db
-.sqlx
-.idea
+.sqlx/
+.idea/
+.zed/
