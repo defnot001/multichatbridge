@@ -29,7 +29,7 @@ pub fn admin_routes(app_state: AppState) -> Router {
 }
 
 pub async fn handle_admin_list(State(app_state): State<AppState>) -> impl IntoResponse {
-    if let Ok(users) = UserModelController::list_users(app_state.db_pool).await {
+    if let Ok(users) = UserModelController::list_users(&app_state.db_pool).await {
         tracing::info!("User List Requested: {:#?}", users);
         return Json(users).into_response();
     }
@@ -42,7 +42,7 @@ pub async fn handle_admin_add(
     State(app_state): State<AppState>,
     Json(body): Json<AdminPostBody>,
 ) -> impl IntoResponse {
-    match UserModelController::add_user(body.clone(), app_state.db_pool).await {
+    match UserModelController::add_user(body.clone(), &app_state.db_pool).await {
         Ok(_) => {
             tracing::info!("User Added: {:#?}", body);
             Json(AdminResponseBody {
@@ -50,7 +50,7 @@ pub async fn handle_admin_add(
                 reason: None,
                 user: Some(json!({
                     "server_id": body.server_id,
-                    "server_list": body.server_list,
+                    "server_list": body.server_list, // FIXME: Return the actual list instead of the admin input
                 })),
             })
             .into_response()
@@ -73,10 +73,13 @@ pub async fn handle_admin_delete(
     State(app_state): State<AppState>,
     Json(body): Json<AdminDeleteBody>,
 ) -> impl IntoResponse {
-    match UserModelController::delete_user(body.clone(), app_state.db_pool.clone()).await {
+    match UserModelController::delete_user(body.clone(), &app_state.db_pool.clone()).await {
         Ok(_) => {
-            match ConfigModelController::delete_config(body.server_id.as_str(), app_state.db_pool)
-                .await
+            match ConfigModelController::delete_config_by_server_id(
+                body.server_id.as_str(),
+                &app_state.db_pool,
+            )
+            .await
             {
                 Ok(_) => {
                     tracing::info!("User and Config deleted: {:#?}", body);
@@ -111,7 +114,9 @@ pub async fn handle_admin_update(
     State(app_state): State<AppState>,
     Json(body): Json<AdminUpdateBody>,
 ) -> impl IntoResponse {
-    match UserModelController::update_user(body.clone(), app_state.db_pool).await {
+    match UserModelController::update_user(body.clone(), &app_state.db_pool, &app_state.config.SALT)
+        .await
+    {
         Ok(user) => {
             tracing::info!("User Updated: {:#?}", user);
             Json(AdminResponseBody {

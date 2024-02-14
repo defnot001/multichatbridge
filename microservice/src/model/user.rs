@@ -63,6 +63,7 @@ impl UserModelController {
     pub async fn update_user(
         data: AdminUpdateBody,
         db_pool: &SqlitePool,
+        salt: &str,
     ) -> anyhow::Result<UserNoToken> {
         if let Some(mut server_list) = data.server_list.clone() {
             if server_list.is_empty() {
@@ -80,7 +81,7 @@ impl UserModelController {
             };
 
         let hashed_token = if let Some(token) = data.auth_token {
-            Some(hash_password(token))
+            Some(hash_password(token, salt))
         } else {
             None
         };
@@ -161,11 +162,12 @@ impl UserInDB {
         server_id: String,
         server_list: Vec<String>,
         unhashed_auth_token: String,
+        salt: &str,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             server_id,
             server_list: serde_json::to_string(&server_list)?,
-            auth_token: hash_password(unhashed_auth_token),
+            auth_token: hash_password(unhashed_auth_token, salt),
         })
     }
 }

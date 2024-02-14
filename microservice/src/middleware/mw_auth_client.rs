@@ -8,18 +8,27 @@ use axum_extra::TypedHeader;
 use headers::{authorization::Bearer, Authorization};
 use sqlx::SqlitePool;
 
-use crate::ctx::ctx_client::{ClientCtx, Identifier};
-use crate::database_utils::DatabaseUtils;
-use crate::model::user::UserModelController;
+use crate::{config::Config, model::user::UserModelController, AppState};
+use crate::{
+    ctx::ctx_client::{ClientCtx, Identifier},
+    database_utils::hash_password,
+};
 
 pub async fn mw_client_auth(
     client_ctx: ClientCtx,
-    State(db_pool): State<SqlitePool>,
+    State(app_state): State<AppState>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if let Err(e) = authorize_client(client_ctx.identifier(), db_pool, &auth).await {
+    if let Err(e) = authorize_client(
+        client_ctx.identifier(),
+        &app_state.db_pool,
+        &auth,
+        &app_state.config.SALT,
+    )
+    .await
+    {
         if e.to_string() == "Unauthorized Admin Request" {
             return Err(StatusCode::UNAUTHORIZED);
         }
@@ -34,15 +43,16 @@ pub async fn mw_client_auth(
 
 async fn authorize_client(
     identifier: &Identifier,
-    db_pool: SqlitePool,
+    db_pool: &SqlitePool,
     auth_token: &Authorization<Bearer>,
+    salt: &str,
 ) -> anyhow::Result<()> {
     let user = match UserModelController::get_user_by_id(identifier.server_id(), db_pool).await {
         Ok(user) => user,
         Err(e) => return Err(e),
     };
 
-    if user.hashed_auth_token != DatabaseUtils::hash_password(auth_token.token().to_string()) {
+    if user.hashed_auth_token != hash_password(auth_token.token().to_string(), salt) {
         tracing::error!("Unauthorized Admin Request Attempt");
         return Err(anyhow::anyhow!("Unauthorized Admin Request"));
     }

@@ -8,28 +8,35 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::config::Config;
 use crate::ctx::ctx_client::{ClientCtx, Identifier};
 use crate::middleware::mw_auth_client::mw_client_auth;
 use crate::model::config::{ClientConfig, ConfigModelController};
 use crate::model::user::UserModelController;
+use crate::AppState;
 
-pub fn config_routes(db_pool: SqlitePool) -> Router {
+pub fn config_routes(app_state: AppState) -> Router {
     Router::new()
         .route("/get", get(handle_config_get))
         .route("/list", get(handle_config_list))
         .route("/add", post(handle_config_post))
         .route_layer(middleware::from_fn_with_state(
-            db_pool.clone(),
+            app_state.clone(),
             mw_client_auth,
         ))
-        .with_state(db_pool)
+        .with_state(app_state)
 }
 
 pub async fn handle_config_get(
-    State(db_pool): State<SqlitePool>,
+    State(app_state): State<AppState>,
     Extension(client_ctx): Extension<ClientCtx>,
 ) -> impl IntoResponse {
-    match ConfigModelController::get_config_by_identifier(client_ctx.identifier, db_pool).await {
+    match ConfigModelController::get_config_by_identifier(
+        &client_ctx.identifier,
+        &app_state.db_pool,
+    )
+    .await
+    {
         Ok(client_config) => {
             tracing::info!("Client Config Requested: {:#?}", client_config);
             Json(client_config).into_response()
@@ -42,11 +49,14 @@ pub async fn handle_config_get(
 }
 
 pub async fn handle_config_list(
-    State(db_pool): State<SqlitePool>,
+    State(app_state): State<AppState>,
     Extension(client_ctx): Extension<ClientCtx>,
 ) -> impl IntoResponse {
-    match ConfigModelController::get_config_by_server_id(client_ctx.identifier.server_id(), db_pool)
-        .await
+    match ConfigModelController::get_config_by_server_id(
+        client_ctx.identifier.server_id(),
+        &app_state.db_pool,
+    )
+    .await
     {
         Ok(client_configs) => {
             tracing::info!("Client Configs Requested: {:#?}", client_configs);
@@ -60,11 +70,11 @@ pub async fn handle_config_list(
 }
 
 pub async fn handle_config_post(
-    State(db_pool): State<SqlitePool>,
+    State(app_state): State<AppState>,
     Extension(client_ctx): Extension<ClientCtx>,
     Json(body): Json<ConfigRequestBody>,
 ) -> impl IntoResponse {
-    if let Err(e) = is_config_allowed(client_ctx.identifier(), &body, db_pool.clone()).await {
+    if let Err(e) = is_config_allowed(client_ctx.identifier(), &body, &app_state.db_pool).await {
         return (
             StatusCode::FORBIDDEN,
             format!("Not allowed to add config: {}", e),
@@ -75,7 +85,7 @@ pub async fn handle_config_post(
     match ConfigModelController::add_or_update_config(
         client_ctx.identifier(),
         &body.subscriptions,
-        db_pool,
+        &app_state.db_pool,
     )
     .await
     {
@@ -93,7 +103,7 @@ pub async fn handle_config_post(
 pub async fn is_config_allowed(
     identifier: &Identifier,
     body: &ConfigRequestBody,
-    db_pool: SqlitePool,
+    db_pool: &SqlitePool,
 ) -> anyhow::Result<()> {
     let user = UserModelController::get_user_by_id(identifier.server_id(), db_pool).await?;
 
@@ -126,7 +136,7 @@ pub struct ConfigResponseBody {
 impl From<ClientConfig> for ConfigResponseBody {
     fn from(config: ClientConfig) -> Self {
         Self {
-            server_id: config.server_id,
+            server_id: config.identifier.server_id,
             subscriptions: config.subscriptions,
         }
     }
