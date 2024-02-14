@@ -9,6 +9,7 @@ pub struct Config {
     pub DATABASE_URL: String,
     pub DATABASE_MAX_CONNECTIONS: u8,
     pub ADMIN_TOKEN: String,
+    pub SALT: String,
 }
 
 impl Config {
@@ -21,6 +22,7 @@ impl Config {
         let DB_MAX_CONNECTIONS =
             var("DATABASE_MAX_CONNECTIONS").expect("`DB_MAX_CONNECTIONS` is not set");
         let ADMIN_TOKEN = var("ADMIN_TOKEN").expect("`ADMIN_TOKEN` is not set");
+        let SALT = var("SALT").expect("`SALT` is not set");
 
         let SERVER_IP = Config::parse_ip(SERVER_IP).expect("IP Address wrong format");
         let SERVER_PORT = SERVER_PORT.parse::<u16>()?;
@@ -33,6 +35,7 @@ impl Config {
             DATABASE_URL: DB_URL,
             DATABASE_MAX_CONNECTIONS: DB_MAX_CONNECTIONS,
             ADMIN_TOKEN,
+            SALT,
         })
     }
 
