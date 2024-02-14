@@ -1,0 +1,14 @@
+// Rename this file to config.json and fill in the values.
+// The bot token can be obtained from the Discord Developer Portal.
+// You can add more chatbridge_channels by adding more objects to the chatbridge_channels array.
+{
+  "bot_token": "Your Bot Token Here",
+  "server_id": "Your Server ID here", // for example "kiwitech"
+  "chatbridge_channels": [
+    {
+      "client_id": "smp",
+      "channel_id": 1051500062129266730,
+      "webhook_url": "https://discord.com/api/webhooks/1198267536219836476/Xxm0K0yj-_H27NMCJeNj2MaDwItgJ_IagLOoDqD39ZHCz_Bqt75820qaCcAmRoBezrL3"
+    }
+  ]
+}
