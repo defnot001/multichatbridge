@@ -1,9 +1,12 @@
+#![forbid(unsafe_code)]
+#![allow(unused, dead_code)] // for development
+
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::Router;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
-use tokio::sync::Mutex as TokioMutex;
+use tokio::{main, sync::Mutex as TokioMutex};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -20,7 +23,9 @@ mod model;
 mod routes;
 mod websocket;
 
-#[tokio::main]
+type ActiveConnections = Arc<TokioMutex<Vec<ActiveConnection>>>;
+
+#[main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_target(false)
@@ -37,8 +42,8 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState::new(db_pool, config);
 
     let app = Router::new()
-        .merge(websocket_routes(app_state.db_pool.clone()))
-        .nest("/config", config_routes(app_state.db_pool.clone()))
+        .merge(websocket_routes(app_state.clone()))
+        .nest("/config", config_routes(app_state.clone()))
         .nest("/admin", admin_routes(app_state.clone()))
         .fallback(routes::not_found::handle_404);
 
@@ -63,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
 struct AppState {
     db_pool: SqlitePool,
     config: Config,
-    active_connections: Arc<TokioMutex<Vec<ActiveConnection>>>,
+    active_connections: ActiveConnections,
 }
 
 impl AppState {
@@ -80,4 +85,13 @@ impl AppState {
 struct ActiveConnection {
     identifier: Identifier,
     subscriptions: Vec<String>,
+}
+
+impl ActiveConnection {
+    fn new(identifier: impl Into<Identifier>, subscriptions: Vec<String>) -> Self {
+        Self {
+            identifier: identifier.into(),
+            subscriptions,
+        }
+    }
 }
