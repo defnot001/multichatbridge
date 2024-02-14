@@ -44,55 +44,35 @@ impl Identifier {
     pub fn client_id(&self) -> &str {
         &self.client_id
     }
-
-    /// Tries to create a new [Identifier] from a string representation.
-    ///
-    /// The format of the client ID is `server_id:client_id`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// let id = Identifier::try_from_string("kiwitech:smp").unwrap();
-    /// assert_eq!(id.server_id(), "kiwitech");
-    /// assert_eq!(id.client_id(), "smp");
-    /// ```
-    pub fn try_from_string(s: impl Into<String>) -> Result<Self, anyhow::Error> {
-        let s = s.into();
-        let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() != 2 {
-            return Err(anyhow::anyhow!("Invalid client ID format"));
-        }
-        Ok(Self::new(parts[0].to_string(), parts[1].to_string()))
-    }
 }
 
-impl From<(String, String)> for Identifier {
-    fn from((namespace, id): (String, String)) -> Self {
-        Self::new(namespace, id)
-    }
-}
+// impl From<(String, String)> for Identifier {
+//     fn from((namespace, id): (String, String)) -> Self {
+//         Self::new(namespace, id)
+//     }
+// }
 
-impl From<(&str, &str)> for Identifier {
-    fn from((namespace, id): (&str, &str)) -> Self {
-        Self::new(namespace, id)
-    }
-}
+// impl From<(&str, &str)> for Identifier {
+//     fn from((namespace, id): (&str, &str)) -> Self {
+//         Self::new(namespace, id)
+//     }
+// }
 
-impl TryFrom<String> for Identifier {
-    type Error = anyhow::Error;
+// impl TryFrom<String> for Identifier {
+//     type Error = anyhow::Error;
 
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::try_from_string(s)
-    }
-}
+//     fn try_from(s: String) -> Result<Self, Self::Error> {
+//         Self::try_from_string(s)
+//     }
+// }
 
-impl TryFrom<&str> for Identifier {
-    type Error = anyhow::Error;
+// impl TryFrom<&str> for Identifier {
+//     type Error = anyhow::Error;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::try_from_string(s)
-    }
-}
+//     fn try_from(s: &str) -> Result<Self, Self::Error> {
+//         Self::try_from_string(s)
+//     }
+// }
 
 impl std::fmt::Display for Identifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -104,7 +84,13 @@ impl FromStr for Identifier {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_from_string(s)
+        let parts = s.split(":").collect::<Vec<_>>();
+
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid identifier format"));
+        }
+
+        Ok(Self::new(parts[0], parts[1]))
     }
 }
 
@@ -148,7 +134,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientCtx {
             .and_then(|header| header.to_str().ok())
             .ok_or((StatusCode::UNAUTHORIZED, "Missing X-Client-ID header"))?;
 
-        let client_id = Identifier::try_from_string(client_id_str);
+        let client_id = Identifier::from_str(client_id_str);
 
         match client_id {
             Ok(client_id) => Ok(Self::new(client_id)),
