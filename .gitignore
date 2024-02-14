@@ -1,8 +1,10 @@
 /microservice/target
+discordbot/target
 /testclient
 
 .DS_Store
 config.toml
+config.json
 *.db
 .sqlx/
 .idea/
